@@ -48,6 +48,10 @@ static float altitude_m = 50.0;  // Altitude in meters
 static double deg2rad = 0.0;
 static double m_deg_lat = 0.0, m_deg_long = 0.0;
 
+// Debug variables
+static uint32_t packet_count = 0;
+static uint32_t last_debug_print = 0;
+
 void setup() {
   char text[128];
   time_t time_2;
@@ -148,7 +152,8 @@ void setup() {
   Serial.println("\nStarting RID broadcast...");
   Serial.println("Look for WiFi network: 'OpenDroneID_XXXXXX'");
   Serial.println("Use a Remote ID scanner app to detect the signal");
-  Serial.println("Note: ESP32-C3 only supports WiFi, no Bluetooth\n");
+  Serial.println("Note: ESP32-C3 only supports WiFi, no Bluetooth");
+  Serial.println("\n=== DEBUG MODE: Printing every RID packet transmission ===\n");
   
   // Seed random number generator
   srand(micros());
@@ -195,8 +200,8 @@ void loop() {
     waypoint = (waypoint + 1) % WAYPOINTS;
   }
   
-  // Transmit RID data every 25ms (40Hz)
-  if ((msecs - last_update) > 24) {
+  // Transmit RID data every 1000ms (1Hz) - ASTM F3411-19 standard
+  if ((msecs - last_update) > 999) {
     last_update = msecs;
     
     // Update time
@@ -209,19 +214,43 @@ void loop() {
     
     // Transmit RID data
     squitter.transmit(&utm_data);
+    packet_count++;
     
-    // Print status every 5 seconds
+    // Debug: Print every packet transmission (every 1000ms)
+    Serial.print("📡 TX #");
+    Serial.print(packet_count);
+    Serial.print(" | Time: ");
+    if (utm_data.hours < 10) Serial.print("0");
+    Serial.print(utm_data.hours);
+    Serial.print(":");
+    if (utm_data.minutes < 10) Serial.print("0");
+    Serial.print(utm_data.minutes);
+    Serial.print(":");
+    if (utm_data.seconds < 10) Serial.print("0");
+    Serial.print(utm_data.seconds);
+    Serial.print(" | Pos: ");
+    Serial.print(utm_data.latitude_d, 4);
+    Serial.print(",");
+    Serial.print(utm_data.longitude_d, 4);
+    Serial.print(" | Alt: ");
+    Serial.print(utm_data.alt_agl_m, 0);
+    Serial.print("m | Hdg: ");
+    Serial.print(utm_data.heading);
+    Serial.print("° | Speed: ");
+    Serial.print(utm_data.speed_kn);
+    Serial.println("kn");
+    
+    // Print summary every 5 seconds
     static uint32_t last_status = 0;
     if ((msecs - last_status) > 5000) {
       last_status = msecs;
-      Serial.print("Transmitting RID - Time: ");
-      Serial.print(utm_data.hours);
-      Serial.print(":");
-      if (utm_data.minutes < 10) Serial.print("0");
-      Serial.print(utm_data.minutes);
-      Serial.print(":");
-      if (utm_data.seconds < 10) Serial.print("0");
-      Serial.println(utm_data.seconds);
+      Serial.print("\n📊 SUMMARY: ");
+      Serial.print(packet_count);
+      Serial.print(" packets transmitted | Rate: ");
+        Serial.print(1.0, 1);  // 1000ms = 1Hz
+      Serial.print(" Hz | Uptime: ");
+      Serial.print(msecs / 1000);
+      Serial.println(" seconds\n");
     }
   }
 }
