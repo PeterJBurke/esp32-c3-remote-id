@@ -15,6 +15,7 @@
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
+#include <WiFi.h>
 
 #include "id_open.h"
 
@@ -58,6 +59,28 @@ void setup() {
   struct tm clock_tm;
   struct timeval tv = {0,0};
   struct timezone utc = {0,0};
+  
+  // Print WiFi MAC address for debugging
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  Serial.printf("WiFi MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", 
+               mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  
+  // Scan WiFi networks to find the best channel
+  Serial.println("Scanning WiFi networks...");
+  int n = WiFi.scanNetworks();
+  if (n == 0) {
+    Serial.println("No networks found");
+  } else {
+    Serial.printf("Found %d networks:\n", n);
+    for (int i = 0; i < n; ++i) {
+      Serial.printf("%2d: %s (%d) %s\n", 
+                   i + 1, 
+                   WiFi.SSID(i).c_str(), 
+                   WiFi.channel(i), 
+                   (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "open" : "encrypted");
+    }
+  }
   
   Serial.begin(115200);
   delay(2000);  // Give more time for ESP32-C3 to initialize
@@ -129,7 +152,9 @@ void setup() {
   
   // Print configuration
   Serial.println("\nConfiguration:");
-  Serial.print("Board: ESP32-C3 Mini");
+  Serial.print("Board: ESP32-C3 Mini\n");
+  Serial.print("WiFi Channel: ");
+  Serial.println(WIFI_CHANNEL);
   Serial.print("Operator ID: ");
   Serial.println(utm_parameters.UAS_operator);
   Serial.print("UAV ID: ");
@@ -149,6 +174,15 @@ void setup() {
   Serial.print("Meters per degree long: ");
   Serial.println(m_deg_long, 2);
   
+  // Print WiFi status
+  Serial.println("\nWiFi Status:");
+  Serial.print("SSID: ");
+  Serial.println(WiFi.SSID());
+  Serial.print("Channel: ");
+  Serial.println(WiFi.channel());
+  Serial.print("Status: ");
+  Serial.println(WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
+  
   Serial.println("\nStarting RID broadcast...");
   Serial.println("Look for WiFi network: 'OpenDroneID_XXXXXX'");
   Serial.println("Use a Remote ID scanner app to detect the signal");
@@ -160,7 +194,8 @@ void setup() {
 }
 
 void loop() {
-  static uint32_t last_update = 0, last_waypoint = 0;
+  static uint32_t last_update = 0, last_waypoint = 0, last_status = 0;
+  static int waypoint_counter = 0;
   uint32_t msecs = millis();
   char text[64];
   
@@ -169,24 +204,26 @@ void loop() {
     last_waypoint = msecs;
     
     // Move to next waypoint
+    waypoint_counter = (waypoint_counter + 1) % WAYPOINTS;
+    waypoint = waypoint_counter;
+    
     utm_data.latitude_d = latitude[waypoint];
     utm_data.longitude_d = longitude[waypoint];
     
     // Calculate heading to next waypoint
-    if (waypoint < WAYPOINTS - 1) {
-      double lat1 = latitude[waypoint] * deg2rad;
-      double lon1 = longitude[waypoint] * deg2rad;
-      double lat2 = latitude[waypoint + 1] * deg2rad;
-      double lon2 = longitude[waypoint + 1] * deg2rad;
-      
-      double dlon = lon2 - lon1;
-      double y = sin(dlon) * cos(lat2);
-      double x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dlon);
-      utm_data.heading = (int)(atan2(y, x) * 180.0 / M_PI + 360.0) % 360;
-    }
+    int next_waypoint = (waypoint + 1) % WAYPOINTS;
+    double lat1 = latitude[waypoint] * deg2rad;
+    double lon1 = longitude[waypoint] * deg2rad;
+    double lat2 = latitude[next_waypoint] * deg2rad;
+    double lon2 = longitude[next_waypoint] * deg2rad;
+    
+    double dlon = lon2 - lon1;
+    double y = sin(dlon) * cos(lat2);
+    double x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dlon);
+    utm_data.heading = (int)(atan2(y, x) * 180.0 / M_PI + 360.0) % 360;
     
     // Print waypoint info
-    Serial.print("Waypoint ");
+    Serial.print("\nWaypoint ");
     Serial.print(waypoint);
     Serial.print(": ");
     Serial.print(utm_data.latitude_d, 6);
@@ -195,14 +232,11 @@ void loop() {
     Serial.print(" (heading: ");
     Serial.print(utm_data.heading);
     Serial.println("°)");
-    
-    // Move to next waypoint
-    waypoint = (waypoint + 1) % WAYPOINTS;
   }
   
   // Transmit RID data every 1000ms (1Hz) - ASTM F3411-19 standard
-  if ((msecs - last_update) > 999) {
-    last_update = msecs;
+  if ((msecs - last_update) >= 1000) {
+    last_update = msecs - (msecs % 1000);  // Align to 1-second boundary
     
     // Update time
     time_t time_2;
@@ -211,6 +245,19 @@ void loop() {
     utm_data.seconds = gmt->tm_sec;
     utm_data.minutes = gmt->tm_min;
     utm_data.hours = gmt->tm_hour;
+    
+    // Print status every 5 seconds
+    if ((msecs - last_status) >= 5000) {
+      last_status = msecs;
+      Serial.print("\nWiFi Status: ");
+      Serial.print(WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
+      Serial.print(", Channel: ");
+      Serial.print(WiFi.channel());
+      Serial.print(", RSSI: ");
+      Serial.print(WiFi.RSSI());
+      Serial.print(" dBm, Packets: ");
+      Serial.println(packet_count);
+    }
     
     // Transmit RID data
     squitter.transmit(&utm_data);
