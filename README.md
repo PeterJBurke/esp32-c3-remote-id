@@ -1,3 +1,6 @@
+Do not use, it is broken since ESP Dev upgraded, the sxjack code does not work anymore. I will delete this repo.
+
+
 # ESP32-C3 Remote ID (OpenDroneID) Project
 
 This project implements Remote ID (RID) broadcasting on an ESP32-C3 Mini 1 development board, compliant with ASTM F3411-19 standard for drone identification.
